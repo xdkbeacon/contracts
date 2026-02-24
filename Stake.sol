@@ -423,12 +423,8 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             if (flag) {
                 teamProfits[parent] += (inUsdt * REF_TUI) / STAKE_LENGTH;
                 IERC20Upgradeable(xdkAddress).safeTransfer(parent, tui);  
-            }else{
-                IERC20Upgradeable(xdkAddress).safeTransfer(profitAddress, tui);
             }
         }
-        }else{
-            IERC20Upgradeable(xdkAddress).safeTransfer(profitAddress, tui);
         }
         uint256 lpXDK = inXDK - profitFee - burnFee - tui;
 
@@ -626,8 +622,6 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         if (flag && amount > 0) {
             IERC20Upgradeable(xdkAddress).safeTransfer(user, amount);
             teamProfits[user] += (amount * price) / 1e18;
-        }else if(amount >0){
-            IERC20Upgradeable(xdkAddress).safeTransfer(profitAddress, amount);
         }
     }
 
