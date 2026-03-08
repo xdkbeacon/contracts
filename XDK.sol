@@ -457,7 +457,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
                     0, // accept any amount of ETH
                     path,
                     to,
-                    block.timestamp + 300
+                    block.timestamp
                 );
             return true;
         }
@@ -479,7 +479,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
                     0, // accept any amount of ETH
                     path,
                     to,
-                    block.timestamp + 300
+                    block.timestamp
                 );
             return true;
         }
@@ -498,7 +498,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
             0,
             0,
             to,
-            block.timestamp + 300
+            block.timestamp 
         );
     }
 

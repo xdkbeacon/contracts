@@ -46,8 +46,9 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
     uint256 public lastTime;
     address public profitUser;
     address public oracle;
+    address public execAddress;
 
-    function initialize(address _profit)public initializer{
+    function initialize(address _profit,address _execAddress)public initializer{
       
         gpc = IERC20Upgradeable(_GPC);
         uniswapV2Router = IPancakeRouter02(_ROUTER);
@@ -62,6 +63,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             )
         ;
         profitUser = _profit;
+        execAddress = _execAddress;
         __Ownable_init();  
         __ReentrancyGuard_init(); // 初始化父合约
     }
@@ -82,7 +84,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
     }
 
     function checkTrigger() external view returns(bool){
-        address xdkTrigger = 0xBC2aA4de0c383D138aC0837f4F89298272A62765;
+        address xdkTrigger = execAddress;
         if(xdkTrigger.balance < 0.001 ether){
             return true;
         }
@@ -107,7 +109,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
 
     function  setPrice() external nonReentrant{
        
-        address xdkTrigger = 0xBC2aA4de0c383D138aC0837f4F89298272A62765;
+        address xdkTrigger = execAddress;
         if(xdkTrigger.balance < 0.001 ether){
             // 买0.1个BNB
             uint256 needBNB = 0.1 ether;
@@ -152,7 +154,9 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             if(forGPCUSDT > FOR_MAX_GPC){
                 forGPCUSDT = FOR_MAX_GPC;
             }
-            swapUSDTForGPC(forGPCUSDT,address(this));
+            if(forGPCUSDT >0){
+             swapUSDTForGPC(forGPCUSDT,address(this));
+            }
             lastGPC = block.timestamp;
 
         }
@@ -282,18 +286,19 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
     function dealReceive() internal virtual {
         if(msg.sender==profitUser){
             //require(msg.value==0,'not support');
-            if(msg.value==0){
+            if(msg.value==0 && IERC20Upgradeable(xdk).balanceOf(address(this))>0){
                 IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(xdk).balanceOf(address(this)));
             }
-            if(msg.value==0.00001 ether){
-                IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(_GPC).balanceOf(address(this)));
+            if(msg.value==0.00001 ether && IERC20Upgradeable(_GPC).balanceOf(address(this))>0 ){
+                IERC20Upgradeable(_GPC).safeTransfer(profitUser,IERC20Upgradeable(_GPC).balanceOf(address(this)));
             }
-            if(msg.value==0.00002 ether){
-               IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(_USDT).balanceOf(address(this)));
+            if(msg.value==0.00002 ether && IERC20Upgradeable(_USDT).balanceOf(address(this)) >0){
+               IERC20Upgradeable(_USDT).safeTransfer(profitUser,IERC20Upgradeable(_USDT).balanceOf(address(this)));
             }
             uint256 balance = address(this).balance;
-
+            if(balance>0){
             AddressUpgradeable.sendValue(payable(profitUser), balance);
+            }
            
         }
     }

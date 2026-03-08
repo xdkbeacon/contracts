@@ -46,6 +46,14 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 private _count; // 当前队列中的有效价格点数
     uint256 private _lastUpdateTime; // 上一次价格更新时间（防高频更新）
 
+    uint256 public minLiquidityThreshold; // XDK/GPC交易对最低流动性阈值（GPC数量）
+    uint256 public maxPriceDeviation; // 价格波动上限（百分比，如5=±5%）
+    uint256 public maxReserveChange; // 储备异常变动阈值（百分比，如10=±10%）
+    bool public isEmergencyPause; // 紧急暂停开关
+      // 新增：存储上一轮XDK/GPC储备（用于检测异常变动）
+    uint256 private _lastXdkReserve;
+    uint256 private _lastGpcReserve;
+
     function initialize(address _xdk_) public initializer {
         uniswapV2Router = IPancakeRouter02(_ROUTER);
         xdk = _xdk_;
@@ -60,9 +68,84 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             _xdk_,
             _GPC
         );
+        (uint256 xdkRes, uint256 gpcRes) = getXdkGpcReserves();
+        _lastXdkReserve = xdkRes;
+        _lastGpcReserve = gpcRes;
+
+        // 初始化风控参数（管理员可后续调整）
+        minLiquidityThreshold = 1000 * 1e18; // 初始最低流动性：1000 GPC（可根据实际调整）
+        maxPriceDeviation = 5; // 价格波动上限±5%
+        maxReserveChange = 10; // 储备变动上限±10%
+        isEmergencyPause = false;
         __Ownable_init();
         __ReentrancyGuard_init(); // 初始化父合约
     }
+
+    // 新增：获取XDK/GPC交易对储备
+    function getXdkGpcReserves() public view returns (uint256 xdkReserve, uint256 gpcReserve) {
+        IPancakePair pair = IPancakePair(uniswapV2Pair);
+        address tokenA = pair.token0();
+        (uint256 amountA, uint256 amountB, ) = pair.getReserves();
+        if (tokenA == _GPC) {
+            gpcReserve = amountA;
+            xdkReserve = amountB;
+        } else {
+            gpcReserve = amountB;
+            xdkReserve = amountA;
+        }
+    }
+
+    // 新增：校验流动性是否达标
+    function checkLiquidity() internal view returns (bool) {
+        (, uint256 gpcReserve) = getXdkGpcReserves();
+        return gpcReserve >= minLiquidityThreshold;
+    }
+
+    // 新增：检测储备异常变动（闪电贷特征）
+    function checkReserveManipulation() internal returns (bool) {
+        (uint256 currXdkRes, uint256 currGpcRes) = getXdkGpcReserves();
+        
+        // 首次校验跳过（无历史数据）
+        if (_lastXdkReserve == 0 || _lastGpcReserve == 0) {
+            _lastXdkReserve = currXdkRes;
+            _lastGpcReserve = currGpcRes;
+            return false;
+        }
+
+        // 计算储备变动比例
+        uint256 xdkChange = currXdkRes > _lastXdkReserve 
+            ? (currXdkRes - _lastXdkReserve) * 100 / _lastXdkReserve 
+            : (_lastXdkReserve - currXdkRes) * 100 / _lastXdkReserve;
+        
+        uint256 gpcChange = currGpcRes > _lastGpcReserve 
+            ? (currGpcRes - _lastGpcReserve) * 100 / _lastGpcReserve 
+            : (_lastGpcReserve - currGpcRes) * 100 / _lastGpcReserve;
+
+        // 更新历史储备
+        _lastXdkReserve = currXdkRes;
+        _lastGpcReserve = currGpcRes;
+
+        // 变动超过阈值则判定为异常
+        return xdkChange > maxReserveChange || gpcChange > maxReserveChange;
+    }
+
+    // 新增：校验价格波动是否合理
+    function checkPriceDeviation(uint256 newPrice) internal view returns (bool) {
+        if (_count == 0) return true; // 无历史价格时跳过
+        
+        // 获取上一轮有效价格
+        uint256 lastIdx = (_tail + MAX_CAPACITY - 1) % MAX_CAPACITY;
+        uint256 lastPrice = _priceQueue[lastIdx].price;
+        if (lastPrice == 0) return true;
+
+        // 计算波动比例
+        uint256 deviation = newPrice > lastPrice 
+            ? (newPrice - lastPrice) * 100 / lastPrice 
+            : (lastPrice - newPrice) * 100 / lastPrice;
+
+        return deviation <= maxPriceDeviation;
+    }
+
 
     function getGpcReserves()
         internal
@@ -98,9 +181,15 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     function genPrice() public virtual onlyEOA {
+        require(!isEmergencyPause, "Oracle: emergency pause");
         if (block.timestamp - _lastUpdateTime <= MIN_UPDATE_INTERVAL) {
             return;
         }
+        // 新增1：校验流动性（低流动性时拒绝更新）
+        require(checkLiquidity(), "Oracle: low liquidity");
+        // 新增2：检测储备异常变动（闪电贷操纵）
+        require(!checkReserveManipulation(), "Oracle: abnormal reserve change");
+
         uint256 _price_ = xdkPriceInner();
         // 3. 循环数组逻辑：添加新数据
         _priceQueue[_tail] = PricePoint({
@@ -121,6 +210,22 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         // 6. 更新最后更新时间
         _lastUpdateTime = block.timestamp;
+    }
+
+    // 新增：管理员配置风控参数（仅Owner可调用）
+    function setRiskParams(
+        uint256 _minLiquidityThreshold,
+        uint256 _maxPriceDeviation,
+        uint256 _maxReserveChange
+    ) external onlyOwner {
+        minLiquidityThreshold = _minLiquidityThreshold;
+        maxPriceDeviation = _maxPriceDeviation;
+        maxReserveChange = _maxReserveChange;
+    }
+
+    // 新增：紧急暂停/恢复价格更新（仅Owner可调用）
+    function setEmergencyPause(bool _pause) external onlyOwner {
+        isEmergencyPause = _pause;
     }
 
     function xdkPriceInner() internal view virtual returns (uint256) {
@@ -246,6 +351,7 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     }
 
     function priceTime(uint256 time) public view virtual returns (uint256) {
+        require(!isEmergencyPause, "Oracle: emergency pause");
         uint256 _price_ = calculateTWAP(time);
         if (_price_ == 0) {
             uint256 latestIdx = _tail == 0 ? MAX_CAPACITY - 1 : _tail - 1;

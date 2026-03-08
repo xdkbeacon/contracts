@@ -293,11 +293,11 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         require(stakeCounts[user] < MAX_STAKE_COUNTS, "max stake counts error");
         stakeCounts[user] += 1;
         require(
-            lastStakeTime[user] <= block.timestamp + STAKE_COLD_TIME,
+            lastStakeTime[user] + STAKE_COLD_TIME <= block.timestamp,
             "stake cold"
         );
         require(
-            lastStakeTime[msg.sender] <= block.timestamp + STAKE_COLD_TIME,
+            lastStakeTime[msg.sender] +  STAKE_COLD_TIME <=block.timestamp ,
             "stake cold"
         );
         lastStakeTime[user] = block.timestamp;
@@ -727,6 +727,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                 totalStar += val;
             }
         }
+        totalStar += maxStar;
         uint256 realStar = totalStar + teamVirtuallyInvestValue[user];
         uint256 vip = 0;
         if (realStar >= V5_STAR) vip = 5;
