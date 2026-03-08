@@ -24,6 +24,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     uint256 public constant TOTAL_TRADE_FEE = 30; // 3% 总交易费率
     uint256 public constant SELL_RECYCLE_RATE = 100; // 卖单回收10%
     uint256 public constant MAX_RECYCLE_RATE = 100; //最大回收底池10%
+    uint256 public constant BURN_PER_HOUR = 1;
 
     // 分红相关常量
     uint256 public constant REWARD_MIN_HOLD_PECENT = 10; //分红最少占比 1%；
@@ -39,9 +40,10 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     mapping(address => bool) private isShareholder;
     mapping(address => uint256) lpIndex;
 
+    uint256 public immutable maxBurnFee; // 最大销毁量
+
     uint256 public currentRewardIndex; // 分红批次索引
-    uint256 public pendingFees;
-    uint256 public deadFees;
+
     uint256 public rewardPoolBalance;
 
     mapping(address => uint40) public lastBuyTime;
@@ -50,12 +52,14 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
     uint40 public coldTime = 1 minutes;
 
-
     address public marketAddress;
 
     // 打新相关
     uint40 public launchedAtTimestamp; // 开始时间
     bool public isStart; //是否开启交易
+
+    uint256 public lastBurnTime;
+    uint256 public lastHourBurnTotal;
 
     IERC20 internal immutable gpc;
 
@@ -78,16 +82,18 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         uint256 recycleAmount,
         bool success
     );
-    event LpOperationFeeDeducted(
-        address indexed user,
-        bool isAddLp,
-        uint256 feeAmount
-    );
+
     event RewardsDistributed(
         uint256 batchIndex,
         uint256 processedCount,
         uint256 totalDistributed,
         uint256 remainingBalance
+    );
+
+    event RewardsDistributedSim(
+        address user,
+        uint256 rewardPoolBalance,
+        uint256 reward
     );
     event ShareholderAdded(address indexed shareholder);
 
@@ -96,8 +102,10 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         string memory Name,
         string memory Symbol,
         uint256 TotalSupply,
+        uint256 _maxBurnFee,
         address reciveAddress
     ) ERC20(Name, Symbol) {
+        maxBurnFee = _maxBurnFee * 10 ** decimals();
         // 排除免手续费地址
         excludeFromFee(address(0));
         excludeFromFee(DEAD_WALLET);
@@ -108,6 +116,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         gpc = IERC20(_GPC);
         _approve(reciveAddress, _ROUTER, type(uint256).max);
         _approve(address(this), _ROUTER, type(uint256).max);
+        _approve(address(distributor), _ROUTER, type(uint256).max);
         gpc.approve(_ROUTER, type(uint256).max);
     }
 
@@ -127,7 +136,6 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         emit AddressUpdated(_marketAddress);
     }
 
-
     function setAddressFreeze(address account, bool status) external onlyOwner {
         isStop[account] = status;
         emit UserPermit(account, status);
@@ -146,7 +154,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         );
         require(amount > 0, "Zero amount");
         require(!isStop[sender] && !isStop[recipient], "Address stopped");
-        require(marketAddress != address(0),'Market Address is address(0)');
+        require(marketAddress != address(0), "Market Address is address(0)");
 
         address pairAddress = uniswapV2Pair;
 
@@ -163,20 +171,17 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         //uint256 transferAmount = amount;
         bool isBuy = false;
         bool isSell = false;
-        address user = address(0); // 操作关联的用户（用于更新股东）
 
         // 1. 判断买卖单（非LP操作，保留原有逻辑核心）
         if (isPair(recipient)) {
             isSell = true;
-            user = sender;
             pairAddress = recipient;
         } else if (isPair(sender)) {
             isBuy = true;
-            user = recipient;
             pairAddress = sender;
         }
         if (isBuy || isSell) {
-            handlerTranscation(sender, recipient, amount, user, isSell);
+            handlerTranscation(sender, recipient, amount, isSell);
         } else {
             // 非买卖，直接转账
             super._transfer(sender, recipient, amount);
@@ -187,55 +192,65 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         }
     }
 
-    function handlerTranscation(
-        address sender,
-        address recipient,
-        uint256 transferAmount,
-        address user,
-        bool isSell
-    ) internal {
-        require(isStart, "not started");
-        if (!isSell) {
-            lastBuyTime[recipient] = uint40(block.timestamp);
-        } else {
-            require(block.timestamp >= lastBuyTime[sender] + coldTime, "cold");
-        }
-        updateShareholder(user);
-        // 买卖操作：防巨鲸，最大流通量的10%
-        (uint112 reverseThis, ) = getReverses();
-        require(transferAmount < reverseThis / 10, "max cap");
+
+    function dealFee(address sender,address recipient,uint256 transferAmount) internal{
+        uint256 currentBurn = balanceOf(DEAD_WALLET);
         // 买卖操作：扣除3%手续费
         uint256 totalFee = (transferAmount * TOTAL_TRADE_FEE) / 1000;
         if (totalFee > 0) {
             super._transfer(sender, address(this), totalFee);
             transferAmount -= totalFee;
-            uint256 burnAmount = (totalFee * BURN_FEE_RATE) / TOTAL_TRADE_FEE;
+            uint256 burnAmount = 0;
             uint256 blackHoleAmount = (totalFee * BLACK_HOLE_FEE_RATE) /
                 TOTAL_TRADE_FEE;
             uint256 rewardAmount = totalFee - burnAmount - blackHoleAmount;
-            if (burnAmount > 0) {
-                deadFees += burnAmount;   
+            if (currentBurn >= maxBurnFee) {
+                if (burnAmount > 0) {
+                    blackHoleAmount += burnAmount;
+                    burnAmount = 0;
+                }
+            } else {
+                if (currentBurn + burnAmount > maxBurnFee) {
+                    uint256 remaining = maxBurnFee - currentBurn; // 剩余可燃烧额度
+                    uint256 toBurn = remaining; // 本次实际燃烧量（不超过剩余额度）
+                    uint256 excess = burnAmount - toBurn; // 超额部分（需转入黑洞）
 
+                    if (toBurn > 0) {
+                        super._transfer(sender, DEAD_WALLET, toBurn);
+                    }
+                    if (excess > 0) {
+                        blackHoleAmount += excess; // 超额部分进入黑洞
+                    }
+                    burnAmount = toBurn; // 更新burnAmount为实际燃烧量
+                } else {
+                    super._transfer(sender, DEAD_WALLET, burnAmount);
+                }
             }
+
+            
             if (rewardAmount > 0) {
                 // 分红
                 rewardPoolBalance += rewardAmount;
                 if (rewardPoolBalance > 0) {
                     distributeRewardsBatch();
                 }
-               
             }
 
             if (blackHoleAmount > 0) {
                 // 兑换打入底池的数量
-                if(isSell){
-                  pendingFees += blackHoleAmount;
-                  _processPendingFees();
-                }else{
-                    super._transfer(address(this),marketAddress,blackHoleAmount);
-                }
+                
+                super._transfer(
+                        address(this),
+                        marketAddress,
+                        blackHoleAmount
+                    );
+                
             }
-            
+            currentBurn = balanceOf(DEAD_WALLET);
+            if(currentBurn < maxBurnFee){
+                burnLp();
+            }
+
             emit TradeFeesDistributed(
                 sender,
                 recipient,
@@ -244,21 +259,38 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
                 rewardAmount
             );
         }
-       
+
         // ====================== 执行最终转账（保留不变） =======================
         super._transfer(sender, recipient, transferAmount);
     }
 
-    function _processPendingBurn() internal virtual lockTheSwap {
-        if (deadFees > 0) {
-            swapTokenForGPC(deadFees, DEAD_WALLET);
-            deadFees = 0;
-            uint256 gpcBalance = gpc.balanceOf(address(this));
-            if(gpcBalance >0){
-                gpc.transfer(DEAD_WALLET,gpcBalance);
-            }
+    function handlerTranscation(
+        address sender,
+        address recipient,
+        uint256 transferAmount,
+        bool isSell
+    ) internal {
+        require(isStart, "not started");
+        if (!isSell) {
+            lastBuyTime[recipient] = uint40(block.timestamp);
+        } else {
+            require(block.timestamp >= lastBuyTime[sender] + coldTime, "cold");
+        }
+         (uint112 reverseThis, ) = getReverses();
+        require(transferAmount < reverseThis / 10, "max cap");
+        dealFee(sender,recipient,transferAmount);
+        
+    }
+
+    function burnLp() internal{
+        if(lastBurnTime + 1 hours < block.timestamp){
+            uint256 lpAmount = balanceOf(uniswapV2Pair);
+            super._transfer(uniswapV2Pair, DEAD_WALLET, lpAmount*1/1000);
+            lastBurnTime = block.timestamp;
         }
     }
+
+    
 
     // ========================= 股东管理逻辑 =========================
     function updateShareholder(address user) internal virtual nonReentrant {
@@ -291,12 +323,6 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         }
         lastUser = user;
     }
-
-    event RewardsDistributedSim(
-        address user,
-        uint256 rewardPoolBalance,
-        uint256 reward
-    );
 
     // ========================= 分红逻辑（按LP比例分批分发）=========================
     function distributeRewardsBatch() internal virtual nonReentrant {
@@ -379,14 +405,64 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         );
     }
 
-    // ========================= 辅助函数 =========================
-    function _processPendingFees() internal virtual lockTheSwap {
-        // 转成LP
-        if (pendingFees > 0) { 
-            swapAndLiquify(pendingFees);
-            pendingFees = 0;
+    function addLPToken(uint256 amount,address to) external nonReentrant{
+        dealFee(msg.sender,address(this),amount);
+        uint256 xdkBalance = balanceOf(address(this));
+        swapAndLiquify(amount,to);
+        uint256 newBalance = balanceOf(address(this));
+        if(newBalance>xdkBalance){
+            super._transfer(address(this),marketAddress,newBalance-xdkBalance);
+        }
+        updateShareholder(to);
+        lastBuyTime[to] = uint40(block.timestamp);
+
+        uint256 gpcBalance = gpc.balanceOf(address(this));
+        if(gpcBalance >0){
+            gpc.safeTransfer(marketAddress, gpcBalance);
+        }
+       
+       
+    }
+    function addLPGPC(uint256 amount, address to) external nonReentrant{
+        gpc.safeTransferFrom(msg.sender,address(this),amount);
+        swapGPCForToken(amount,address(distributor));
+        dealFee(address(distributor),address(this),amount);
+        uint256 xdkBalance = balanceOf(address(this));
+        swapAndLiquify(amount,to);
+        uint256 newBalance = balanceOf(address(this));
+        if(newBalance>xdkBalance){
+            super._transfer(address(this),marketAddress,newBalance-xdkBalance);
+        }
+        updateShareholder(to);
+        lastBuyTime[to] = uint40(block.timestamp);
+        uint256 gpcBalance = gpc.balanceOf(address(this));
+        if(gpcBalance >0){
+            gpc.safeTransfer(marketAddress, gpcBalance);
+        }
+
+    }
+
+    function swapGPCForToken(
+        uint256 tokenAmount,
+        address to
+    ) internal virtual returns (bool) {
+        unchecked {
+            address[] memory path = new address[](2);
+            path[0] = _GPC;
+            path[1] =address(this);
+
+            uniswapV2Router
+                .swapExactTokensForTokensSupportingFeeOnTransferTokens(
+                    tokenAmount,
+                    0, // accept any amount of ETH
+                    path,
+                    to,
+                    block.timestamp + 300
+                );
+            return true;
         }
     }
+
 
     function swapTokenForGPC(
         uint256 tokenAmount,
@@ -411,7 +487,8 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
     function addLiquidity(
         uint256 tokenAmount,
-        uint256 gpcAmount
+        uint256 gpcAmount,
+        address to
     ) internal virtual {
         uniswapV2Router.addLiquidity(
             address(this),
@@ -420,12 +497,12 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
             gpcAmount,
             0,
             0,
-            DEAD_WALLET,
+            to,
             block.timestamp + 300
         );
     }
 
-    function swapAndLiquify(uint256 tokens) internal virtual {
+    function swapAndLiquify(uint256 tokens,address to) internal virtual {
         uint256 half = tokens / 2;
         uint256 otherHalf = tokens - half;
         uint256 initialBalance = gpc.balanceOf(address(this));
@@ -437,7 +514,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
                 gpc.balanceOf(address(distributor))
             );
             uint256 newBalance = gpc.balanceOf(address(this)) - initialBalance;
-            addLiquidity(otherHalf, newBalance);
+            addLiquidity(otherHalf, newBalance,to);
         }
     }
 
@@ -460,9 +537,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         return (totalLpSupply, totalLp, lp.balanceOf(user));
     }
 
-    function getPendingFees() external view returns (uint256) {
-        return pendingFees;
-    }
+  
 
     function getShareholderCount() external view returns (uint256) {
         return shareholders.length;

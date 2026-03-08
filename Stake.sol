@@ -11,6 +11,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {_GPC, _ROUTER, _WBNB, _USDC, _USDT, DEAD_WALLET} from "./Const.sol";
 import "./IXDKOracle.sol";
+import './IXDK.sol';
 
 contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeMathUpgradeable for uint256;
@@ -75,7 +76,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public constant PROFIT_FEE = 500;
     uint256 public constant BURN_FEE = 3000;
     uint256 public constant MIN_STAKE = 100 ether;
-    uint256 public constant MAX_STAKE = 5000 ether;
+    uint256 public constant MAX_STAKE = 10000 ether;
 
 
      uint256 public constant SLIPPAGE_BPS = 1000; // 全局滑点容忍度 1% (100=1‰, 1000=10%) 可自定义
@@ -123,7 +124,8 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     IPancakePair internal uniswapV2PairGpc;
     IPancakePair internal uniswapV2PairUsdt;
     IERC20Upgradeable internal gpc;
-    uint256 public lastRewardTime;
+    uint256 public lastCalStakeTime;
+    uint256 public unstakeTotal;
 
     function initialize(
         address _xdkAddress,
@@ -270,84 +272,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             block.timestamp
         );
     }
-
-    // ✅ ✅ ✅ 核心修复1：新增滑点计算工具函数 - 防MEV机器人狙击 (重中之重)
-    function _getMinAmountOut(
-        uint256 amountIn,
-        address[] memory path
-    ) internal view virtual returns (uint256) {
-        uint256[] memory amounts = uniswapV2Router.getAmountsOut(
-            amountIn,
-            path
-        );
-        return (amounts[amounts.length - 1] * (10000 - SLIPPAGE_BPS)) / 10000;
-    }
-
-    // ✅ 修复所有swap函数的滑点保护 amountOutMin=0 → 动态计算
-    function swapUSDTForToken(
-        uint256 tokenAmount,
-        address to
-    ) internal virtual returns (bool) {
-        unchecked {
-            address[] memory path = new address[](4);
-            path[0] = _USDT;
-            path[1] = _WBNB;
-            path[2] = _GPC;
-            path[3] = xdkAddress;
-            uint256 minOut = _getMinAmountOut(tokenAmount, path);
-            uniswapV2Router
-                .swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                    tokenAmount,
-                    minOut,
-                    path,
-                    to,
-                    block.timestamp + 300
-                );
-            return true;
-        }
-    }
-
-    function swapTokenForGPC(
-        uint256 tokenAmount,
-        address to
-    ) internal virtual returns (bool) {
-        unchecked {
-            address[] memory path = new address[](2);
-            path[0] = xdkAddress;
-            path[1] = _GPC;
-            uint256 minOut = _getMinAmountOut(tokenAmount, path);
-            uniswapV2Router
-                .swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                    tokenAmount,
-                    minOut,
-                    path,
-                    to,
-                    block.timestamp + 300
-                );
-            return true;
-        }
-    }
-
-    function swapGPCForToken(
-        uint256 tokenAmount,
-        address to
-    ) internal virtual returns (bool) {
-        unchecked {
-            address[] memory path = new address[](2);
-            path[0] = _GPC;
-            path[1] = xdkAddress;
-            uint256 minOut = _getMinAmountOut(tokenAmount, path);
-            uniswapV2Router
-                .swapExactTokensForTokensSupportingFeeOnTransferTokens(
-                    tokenAmount,
-                    minOut,
-                    path,
-                    to,
-                    block.timestamp + 300
-                );
-            return true;
-        }
-    }
+  
 
     function calStake(
         address user,
@@ -428,7 +353,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
         uint256 lpXDK = inXDK - profitFee - burnFee - tui;
 
-        swapAndLiquify(lpXDK);
+        IXDK(xdkAddress).addLPToken(lpXDK,address(this));
 
         mintTo(user, index, usdt);
 
@@ -450,6 +375,10 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         Record storage record = records[index];
         require(block.timestamp >= record.expireTime, "The time is not right");
         require(record.status == 0, "status error");
+         if(lastCalStakeTime + 24 hours < block.timestamp){
+            unstakeTotal = 0;
+            lastCalStakeTime = block.timestamp;
+        }
         address user = record.user;
         stakeCounts[user] -= 1;
         uint256 usdt = record.amount;
@@ -459,6 +388,10 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         uint256 userXDK = (usdt * 1e18) / price;
         uint256 profitXDK = (profit * 1e18) / price;
 
+        unstakeTotal += userXDK;
+        unstakeTotal += profitXDK;
+        uint256 balance =  IERC20Upgradeable(xdkAddress).balanceOf(address(this));
+        require(unstakeTotal<=2*balance/100,'require less then 2%');
         burn(user, record.amount);
         uint256 tokenBefore = IERC20Upgradeable(xdkAddress).balanceOf(
             address(this)
@@ -499,13 +432,16 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             removeLiquidity(lpBalance);
         }
         if (gpc.balanceOf(address(this)) > 0) {
-            swapGPCForToken(gpc.balanceOf(address(this)), address(this));
+            gpc.safeTransfer(msg.sender,gpc.balanceOf(address(this)));
         }
-
-        IERC20Upgradeable(xdkAddress).safeTransfer(
+        if(IERC20Upgradeable(xdkAddress).balanceOf(address(this)) >0){
+            IERC20Upgradeable(xdkAddress).safeTransfer(
             msg.sender,
             IERC20Upgradeable(xdkAddress).balanceOf(address(this))
         );
+        }
+
+        
     }
 
     // ✅ Gas优化：循环内加unchecked
@@ -730,14 +666,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         );
     }
 
-    function swapAndLiquify(uint256 tokens) internal virtual {
-        uint256 half = tokens / 2;
-        uint256 otherHalf = tokens - half;
-        uint256 initialBalance = gpc.balanceOf(address(this));
-        swapTokenForGPC(half, address(this));
-        uint256 newBalance = gpc.balanceOf(address(this)) - initialBalance;
-        if (newBalance > 0) addLiquidity(otherHalf, newBalance);
-    }
+  
 
  
 

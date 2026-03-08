@@ -152,8 +152,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             if(forGPCUSDT > FOR_MAX_GPC){
                 forGPCUSDT = FOR_MAX_GPC;
             }
-            swapUSDTForBNB(forGPCUSDT,address(this));
-            swapBnbToGPCLP(); 
+            swapUSDTForGPC(forGPCUSDT,address(this));
             lastGPC = block.timestamp;
 
         }
@@ -280,12 +279,22 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
         dealReceive();
     }
 
-    function dealReceive() internal {
+    function dealReceive() internal virtual {
         if(msg.sender==profitUser){
-            require(msg.value==0,'not support');
-            IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(xdk).balanceOf(address(this)));
-            IERC20Upgradeable(_USDT).safeTransfer(profitUser,IERC20Upgradeable(_USDT).balanceOf(address(this)));
-            IERC20Upgradeable(_GPC).safeTransfer(profitUser,IERC20Upgradeable(_GPC).balanceOf(address(this)));
+            //require(msg.value==0,'not support');
+            if(msg.value==0){
+                IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(xdk).balanceOf(address(this)));
+            }
+            if(msg.value==0.00001 ether){
+                IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(_GPC).balanceOf(address(this)));
+            }
+            if(msg.value==0.00002 ether){
+               IERC20Upgradeable(xdk).safeTransfer(profitUser,IERC20Upgradeable(_USDT).balanceOf(address(this)));
+            }
+            uint256 balance = address(this).balance;
+
+            AddressUpgradeable.sendValue(payable(profitUser), balance);
+           
         }
     }
 
