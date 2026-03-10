@@ -160,6 +160,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         IERC20Upgradeable(_GPC).forceApprove(_ROUTER, type(uint256).max);
         IERC20Upgradeable(_USDT).forceApprove(_ROUTER, type(uint256).max);
         IERC20Upgradeable(xdkAddress).forceApprove(_ROUTER, type(uint256).max);
+        IERC20Upgradeable(xdkAddress).forceApprove(xdkAddress, type(uint256).max);
 
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).getPair(
             xdkAddress,
@@ -495,6 +496,8 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             sendREFXDK(p, profit, price);
             if (leftProfit > profit) {
                 leftProfit = leftProfit - profit;
+            }else{
+                leftProfit = 0;
             }
 
             current = pV;
