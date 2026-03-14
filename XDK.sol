@@ -36,7 +36,6 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     // 股东与分红相关
     address[] public shareholders; // 股东列表（LP持有者）
     mapping(address => uint256) lpAmounts;
-    address internal lastUser;
     mapping(address => bool) private isShareholder;
     mapping(address => uint256) lpIndex;
 
@@ -129,8 +128,12 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
     function setMarketAddress(address _marketAddress) external onlyOwner {
         require(_marketAddress != address(0), "Invalid address");
+        if(marketAddress != address(0)){
+            includeInFee(marketAddress);
+        }
         marketAddress = _marketAddress;
         excludeFromFee(marketAddress);
+        
         emit AddressUpdated(_marketAddress);
     }
 
@@ -314,28 +317,27 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
         if (user != address(0)) {
             IERC20 lp = IERC20(uniswapV2Pair);
-            uint256 balance = lp.balanceOf(lastUser);
+            uint256 balance = lp.balanceOf(user);
             if (balance > 0) {
-                lpAmounts[lastUser] = balance;
-                if (!isShareholder[lastUser]) {
-                    isShareholder[lastUser] = true; // 1-based索引
-                    shareholders.push(lastUser);
-                    lpIndex[lastUser] = shareholders.length - 1;
-                    emit ShareholderAdded(lastUser);
+                lpAmounts[user] = balance;
+                if (!isShareholder[user]) {
+                    isShareholder[user] = true; // 1-based索引
+                    shareholders.push(user);
+                    lpIndex[user] = shareholders.length - 1;
+                    emit ShareholderAdded(user);
                 }
             } else {
-                if (isShareholder[lastUser]) {
-                    delete isShareholder[lastUser];
-                    uint256 index = lpIndex[lastUser];
+                if (isShareholder[user]) {
+                    delete isShareholder[user];
+                    uint256 index = lpIndex[user];
                     address latest = shareholders[shareholders.length - 1];
                     shareholders[index] = latest;
                     lpIndex[latest] = index;
                     shareholders.pop();
-                    lpIndex[lastUser] = 0;
+                    lpIndex[user] = 0;
                 }
             }
         }
-        lastUser = user;
     }
 
     // ========================= 分红逻辑（按LP比例分批分发）=========================
@@ -420,11 +422,8 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     }
 
     function addLPToken(uint256 amount, address to) external nonReentrant {
-       super._transfer(
-                    msg.sender,
-                    address(this),
-                    amount
-                );
+        require(!isStop[msg.sender] && !isStop[to], "Address stopped");
+       IERC20(address(this)).safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
         swapAndLiquify(amount, to);
         uint256 newBalance = balanceOf(address(this));
@@ -445,6 +444,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     }
 
     function addLPGPC(uint256 amount, address to) external nonReentrant {
+        require(!isStop[msg.sender] && !isStop[to], "Address stopped");
         gpc.safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
         swapGPCForToken(amount, address(distributor));
