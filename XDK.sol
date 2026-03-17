@@ -109,6 +109,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         excludeFromFee(DEAD_WALLET);
         excludeFromFee(address(this));
         excludeFromFee(reciveAddress);
+        excludeFromFee(address(distributor));
         _mint(reciveAddress, TotalSupply * 10 ** decimals());
         gpc = IERC20(_GPC);
         _approve(reciveAddress, _ROUTER, type(uint256).max);
@@ -423,6 +424,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
     function addLPToken(uint256 amount, address to) external nonReentrant {
         require(!isStop[msg.sender] && !isStop[to], "Address stopped");
+        require(isStart, "not started");
        IERC20(address(this)).safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
         swapAndLiquify(amount, to);
@@ -445,6 +447,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
 
     function addLPGPC(uint256 amount, address to) external nonReentrant {
         require(!isStop[msg.sender] && !isStop[to], "Address stopped");
+        require(isStart, "not started");
         gpc.safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
         swapGPCForToken(amount, address(distributor));
