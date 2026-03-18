@@ -11,7 +11,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {_GPC, _ROUTER, _WBNB, _USDC, _USDT, DEAD_WALLET} from "./Const.sol";
 import "./IXDKOracle.sol";
-import './IXDK.sol';
+import "./IXDK.sol";
 
 contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     using SafeMathUpgradeable for uint256;
@@ -78,9 +78,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public constant MIN_STAKE = 100 ether;
     uint256 public constant MAX_STAKE = 10000 ether;
 
-
-     uint256 public constant SLIPPAGE_BPS = 1000; // 全局滑点容忍度 1% (100=1‰, 1000=10%) 可自定义
-
+    uint256 public constant SLIPPAGE_BPS = 1000; // 全局滑点容忍度 1% (100=1‰, 1000=10%) 可自定义
 
     uint256 public constant MAX_10_DAYS_COUNT = 1;
 
@@ -160,7 +158,10 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         IERC20Upgradeable(_GPC).forceApprove(_ROUTER, type(uint256).max);
         IERC20Upgradeable(_USDT).forceApprove(_ROUTER, type(uint256).max);
         IERC20Upgradeable(xdkAddress).forceApprove(_ROUTER, type(uint256).max);
-        IERC20Upgradeable(xdkAddress).forceApprove(xdkAddress, type(uint256).max);
+        IERC20Upgradeable(xdkAddress).forceApprove(
+            xdkAddress,
+            type(uint256).max
+        );
 
         uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).getPair(
             xdkAddress,
@@ -273,7 +274,6 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             block.timestamp
         );
     }
-  
 
     function calStake(
         address user,
@@ -282,7 +282,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     ) external view virtual returns (uint256) {
         require(stakeDays.length > index, "index error");
         require(isBindReferral(user), "need bind");
-        return (usdt * 1e18) /IXDKOracle(oracle).priceTime(15 minutes);
+        return (usdt * 1e18) / IXDKOracle(oracle).priceTime(15 minutes);
     }
 
     function staked(
@@ -298,7 +298,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             "stake cold"
         );
         require(
-            lastStakeTime[msg.sender] +  STAKE_COLD_TIME <=block.timestamp ,
+            lastStakeTime[msg.sender] + STAKE_COLD_TIME <= block.timestamp,
             "stake cold"
         );
         lastStakeTime[user] = block.timestamp;
@@ -311,7 +311,8 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         require(usdt >= MIN_STAKE, "min stake");
 
-        uint256 inXDK = (inUsdt * 1e18) / IXDKOracle(oracle).priceTime(15 minutes);
+        uint256 inXDK = (inUsdt * 1e18) /
+            IXDKOracle(oracle).priceTime(15 minutes);
         require(
             inXDK <= IERC20Upgradeable(xdkAddress).balanceOf(msg.sender),
             "Insufficient balance"
@@ -334,30 +335,29 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             IERC20Upgradeable(xdkAddress).safeTransfer(DEAD_WALLET, burnFee);
         }
         uint256 tui = (inXDK * REF_TUI) / STAKE_LENGTH;
-        if(index >= 2){
-        address parent = getReferral(user);
-        if (parent != address(this)) {
-            uint256 teamProfit = teamProfits[parent];
-            bool flag = false;
-            if (teamProfit < USER_PROFIT1)
-                flag = checkRecord(parent, 0, USER_THRESHOLD1);
-            else if (teamProfit < USER_PROFIT2)
-                flag = checkRecord(parent, 2, USER_THRESHOLD2);
-            else if (teamProfit < USER_PROFIT3)
-                flag = checkRecord(parent, 2, USER_THRESHOLD3);
-            else flag = checkRecord(parent, 2, USER_THRESHOLD4);
-            if (flag) {
-                teamProfits[parent] += (inUsdt * REF_TUI) / STAKE_LENGTH;
-                IERC20Upgradeable(xdkAddress).safeTransfer(parent, tui);  
+        if (index >= 2) {
+            address parent = getReferral(user);
+            if (parent != address(this)) {
+                uint256 teamProfit = teamProfits[parent];
+                bool flag = false;
+                if (teamProfit < USER_PROFIT1)
+                    flag = checkRecord(parent, 0, USER_THRESHOLD1);
+                else if (teamProfit < USER_PROFIT2)
+                    flag = checkRecord(parent, 2, USER_THRESHOLD2);
+                else if (teamProfit < USER_PROFIT3)
+                    flag = checkRecord(parent, 2, USER_THRESHOLD3);
+                else flag = checkRecord(parent, 2, USER_THRESHOLD4);
+                if (flag) {
+                    teamProfits[parent] += (inUsdt * REF_TUI) / STAKE_LENGTH;
+                    IERC20Upgradeable(xdkAddress).safeTransfer(parent, tui);
+                }
             }
-        }
         }
         uint256 lpXDK = inXDK - profitFee - burnFee - tui;
 
-        IXDK(xdkAddress).addLPToken(lpXDK,address(this));
+        IXDK(xdkAddress).addLPToken(lpXDK, address(this));
 
         mintTo(user, index, usdt);
-
     }
 
     function getRecordById(
@@ -376,7 +376,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         Record storage record = records[index];
         require(block.timestamp >= record.expireTime, "The time is not right");
         require(record.status == 0, "status error");
-         if(lastCalStakeTime + 24 hours < block.timestamp){
+        if (lastCalStakeTime + 24 hours < block.timestamp) {
             unstakeTotal = 0;
             lastCalStakeTime = block.timestamp;
         }
@@ -391,8 +391,10 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         unstakeTotal += userXDK;
         unstakeTotal += profitXDK;
-        uint256 balance =  IERC20Upgradeable(xdkAddress).balanceOf(address(this));
-        require(unstakeTotal<=2*balance/100,'require less then 2%');
+        uint256 balance = IERC20Upgradeable(xdkAddress).balanceOf(
+            address(this)
+        );
+        require(unstakeTotal <= (2 * balance) / 100, "require less then 2%");
         burn(user, record.amount);
         uint256 tokenBefore = IERC20Upgradeable(xdkAddress).balanceOf(
             address(this)
@@ -433,16 +435,14 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             removeLiquidity(lpBalance);
         }
         if (gpc.balanceOf(address(this)) > 0) {
-            gpc.safeTransfer(msg.sender,gpc.balanceOf(address(this)));
+            gpc.safeTransfer(msg.sender, gpc.balanceOf(address(this)));
         }
-        if(IERC20Upgradeable(xdkAddress).balanceOf(address(this)) >0){
+        if (IERC20Upgradeable(xdkAddress).balanceOf(address(this)) > 0) {
             IERC20Upgradeable(xdkAddress).safeTransfer(
-            msg.sender,
-            IERC20Upgradeable(xdkAddress).balanceOf(address(this))
-        );
+                msg.sender,
+                IERC20Upgradeable(xdkAddress).balanceOf(address(this))
+            );
         }
-
-        
     }
 
     // ✅ Gas优化：循环内加unchecked
@@ -493,11 +493,11 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                     (profitXdk * (vipRef[pV] - vipRef[current])) /
                     STAKE_LENGTH;
             }
-            sendREFXDK(p, profit, price);
-            if (leftProfit > profit) {
-                leftProfit = leftProfit - profit;
-            }else{
-                leftProfit = 0;
+            // 核心修复：实际发放金额 = 取理论分红和剩余预算的较小值
+            uint256 actualProfit = profit > leftProfit ? leftProfit : profit;
+            if (actualProfit > 0) {
+                sendREFXDK(p, actualProfit, price);
+                leftProfit -= actualProfit; // 扣减实际发放的金额
             }
 
             current = pV;
@@ -669,11 +669,6 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         );
     }
 
-  
-
- 
-
-    
     // ✅ 完整修复：语法正确+循环生效+过期判断正确+无下溢+秒数转换
     function getExpireRecord() external view virtual returns (bool, uint256) {
         bool flag = false;

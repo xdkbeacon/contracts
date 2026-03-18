@@ -114,7 +114,10 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             // 买0.1个BNB
             uint256 needBNB = 0.1 ether;
             uint256 needUSDT = needBNB * IXDKOracle(oracle).bnbPrice() / 1e18;
-            swapUSDTForBNB(needUSDT,xdkTrigger);
+            uint256 usdtBalance = usdt.balanceOf(address(this))
+            if(usdtBalance > needUSDT ){
+                swapUSDTForBNB(needUSDT,xdkTrigger);
+            }
             return;
         }
         
