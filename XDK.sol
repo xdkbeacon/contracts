@@ -425,8 +425,8 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     function addLPToken(uint256 amount, address to) external nonReentrant {
         require(!isStop[msg.sender] && !isStop[to], "Address stopped");
         require(isStart, "not started");
-       IERC20(address(this)).safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
+        IERC20(address(this)).safeTransferFrom(msg.sender, address(this), amount); 
         swapAndLiquify(amount, to);
         uint256 newBalance = balanceOf(address(this));
         if (newBalance > xdkBalance) {
