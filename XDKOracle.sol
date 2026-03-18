@@ -197,8 +197,9 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         require(checkLiquidity(), "Oracle: low liquidity");
         // 新增2：检测储备异常变动（闪电贷操纵）
         require(!checkReserveManipulation(), "Oracle: abnormal reserve change");
-
+      
         uint256 _price_ = xdkPriceInner();
+        require(checkPriceDeviation(_price_),"Oracle: checkPriceDeviation");
         // 3. 循环数组逻辑：添加新数据
         _priceQueue[_tail] = PricePoint({
             price: _price_,
@@ -215,6 +216,7 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             // 队列未满，增加计数
             _count += 1;
         }
+       
 
         // 6. 更新最后更新时间
         _lastUpdateTime = block.timestamp;
