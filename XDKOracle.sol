@@ -54,7 +54,14 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 private _lastXdkReserve;
     uint256 private _lastGpcReserve;
 
-    function initialize(address _xdk_) public initializer {
+    address public execAddress;
+
+    modifier onlyExec() {
+        require(execAddress == msg.sender, "Not Allow");
+        _;
+    }
+
+    function initialize(address _xdk_,address _execAddress) public initializer {
         uniswapV2Router = IPancakeRouter02(_ROUTER);
         xdk = _xdk_;
         address factory = uniswapV2Router.factory();
@@ -77,6 +84,7 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         maxPriceDeviation = 5; // 价格波动上限±5%
         maxReserveChange = 10; // 储备变动上限±10%
         isEmergencyPause = false;
+        execAddress = _execAddress;
         __Ownable_init();
         __ReentrancyGuard_init(); // 初始化父合约
     }
@@ -180,7 +188,7 @@ contract XDKOracle is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         return _usdtAmount * 1e18/_usdtBnbAmount;
     }
 
-    function genPrice() public virtual onlyEOA {
+    function genPrice() public virtual onlyEOA onlyExec {
         require(!isEmergencyPause, "Oracle: emergency pause");
         if (block.timestamp - _lastUpdateTime <= MIN_UPDATE_INTERVAL) {
             return;
