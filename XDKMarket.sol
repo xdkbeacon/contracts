@@ -140,7 +140,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
                 swapTokenForUSDT(fee,address(this));
             }
             lastPrice = IXDKOracle(oracle).priceTime(5 minutes);
-            return
+            return;
         }
         uint256 currentPrice =IXDKOracle(oracle).priceTime(5 minutes);
         
