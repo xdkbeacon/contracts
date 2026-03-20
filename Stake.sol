@@ -72,11 +72,11 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
     uint256 public constant MAX_STAKE_COUNTS = 5;
     uint256 public constant STAKE_COLD_TIME = 1 minutes;
     uint256 public constant LP_REWARD = 100;
-    uint256 public constant REF_TUI = 50;
+    uint256 public constant REF_TUI = 500;
     uint256 public constant PROFIT_FEE = 500;
     uint256 public constant BURN_FEE = 3000;
     uint256 public constant MIN_STAKE = 100 ether;
-    uint256 public constant MAX_STAKE = 10000 ether;
+    uint256 public constant MAX_STAKE = 5000 ether;
 
     uint256 public constant SLIPPAGE_BPS = 1000; // 全局滑点容忍度 1% (100=1‰, 1000=10%) 可自定义
 
@@ -384,7 +384,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         stakeCounts[user] -= 1;
         uint256 usdt = record.amount;
         uint256 profit = record.profit;
-        uint256 price = IXDKOracle(oracle).priceTime(15 minutes);
+        uint256 price = IXDKOracle(oracle).priceTime(24 hours);
         record.xdkPrice = price;
         uint256 userXDK = (usdt * 1e18) / price;
         uint256 profitXDK = (profit * 1e18) / price;
