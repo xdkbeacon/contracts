@@ -335,7 +335,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
             IERC20Upgradeable(xdkAddress).safeTransfer(DEAD_WALLET, burnFee);
         }
         uint256 tui = (inXDK * REF_TUI) / STAKE_LENGTH;
-        if (index >= 2) {
+        if (index >= 3) {
             address parent = getReferral(user);
             if (parent != address(this)) {
                 uint256 teamProfit = teamProfits[parent];
