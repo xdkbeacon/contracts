@@ -355,7 +355,7 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         }
         uint256 lpXDK = inXDK - profitFee - burnFee - tui;
 
-        IXDK(xdkAddress).addLPToken(lpXDK, address(this));
+        IXDK(xdkAddress).addLPToken(lpXDK);
 
         mintTo(user, index, usdt);
     }
@@ -725,7 +725,6 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
                 totalStar += val;
             }
         }
-        totalStar += maxStar;
         uint256 realStar = totalStar + teamVirtuallyInvestValue[user];
         uint256 vip = 0;
         if (realStar >= V5_STAR) vip = 5;

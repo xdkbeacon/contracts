@@ -102,12 +102,28 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
         }
         uint256 currentPrice =IXDKOracle(oracle).priceTime(5 minutes);
         if(currentPrice>=lastPrice*(100+SELL_PRICE)/100  && block.timestamp >= lastTime + FOR_TRADE_COLD){
-            return true;
+            
+            if(IERC20Upgradeable(xdk).balanceOf(address(this))>0){
+                uint256 fee = IERC20Upgradeable(xdk).balanceOf(address(this))* SELL_RATE/1000; 
+                if(fee >0){
+                    return true;
+                }
+            }
+            return false;
         }else  if(currentPrice<=lastPrice*(100-BUY_PRICE)/100  && block.timestamp >= lastTime + FOR_TRADE_COLD){
-            return true;
+            if(usdt.balanceOf(address(this)) >0){
+               return true;
+            }
+            return false;
         }
         if(lastGPC + FOR_GPC_COLD< block.timestamp ){
-            return true;
+            uint256 forGPCUSDT = usdt.balanceOf(address(this)) * FOR_GPC_RATE/10000;
+            if(forGPCUSDT > FOR_MAX_GPC){
+                forGPCUSDT = FOR_MAX_GPC;
+            }
+            if(forGPCUSDT >0){
+                return true;
+            }
         }
         return false;
     }
@@ -146,8 +162,10 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
         
         if(currentPrice>=lastPrice*(100+SELL_PRICE)/100 && block.timestamp >= lastTime + FOR_TRADE_COLD ){
             if(IERC20Upgradeable(xdk).balanceOf(address(this))>0){
-                uint256 fee = IERC20Upgradeable(xdk).balanceOf(address(this))* SELL_RATE/1000;       
-                swapTokenForUSDT(fee,address(this));
+                uint256 fee = IERC20Upgradeable(xdk).balanceOf(address(this))* SELL_RATE/1000; 
+                if(fee >0){
+                    swapTokenForUSDT(fee,address(this));
+                }
             }
             lastPrice = currentPrice;
             lastTime = block.timestamp;
