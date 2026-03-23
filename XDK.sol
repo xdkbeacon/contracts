@@ -284,12 +284,15 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
         require(isStart, "not started");
         if (!isSell) {
             lastBuyTime[recipient] = uint40(block.timestamp);
+            lastLPTime[recipient] = uint40(block.timestamp);
         } else {
+            require(block.timestamp >= lastBuyTime[sender] + coldTime, "cold");
+            lastLPTime[sender] = uint40(block.timestamp);
             if(isBurnLP){
-                burnLp();
-                require(block.timestamp >= lastBuyTime[sender] + coldTime, "cold");
+                burnLp();      
             }
         }
+        
 
         (uint112 reverseThis, ) = getReverses();
         require(transferAmount < reverseThis / 10, "max cap");
@@ -441,7 +444,7 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     function addLPToken(uint256 amount) external nonReentrant {
         require(!isStop[msg.sender], "Address stopped");
         require(isStart, "not started");
-        require(lastLPTime[msg.sender] + coldTime < block.timestamp,'cold time');
+       
         uint256 xdkBalance = balanceOf(address(this));
         IERC20(address(this)).safeTransferFrom(msg.sender, address(this), amount); 
         swapAndLiquify(amount, msg.sender);
@@ -466,7 +469,6 @@ contract XDK is ExcludedFromFeeList, BaseGpc, ReentrancyGuard, ERC20 {
     function addLPGPC(uint256 amount) external nonReentrant {
         require(!isStop[msg.sender], "Address stopped");
         require(isStart, "not started");
-        require(lastLPTime[msg.sender] + coldTime < block.timestamp,'cold time');
         gpc.safeTransferFrom(msg.sender, address(this), amount);
         uint256 xdkBalance = balanceOf(address(this));
         swapGPCForToken(amount, address(distributor));
