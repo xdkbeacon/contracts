@@ -14,6 +14,11 @@ import "./IXDKOracle.sol";
 
 contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
 
+    modifier onlyEOA() {
+        require(tx.origin == msg.sender, "EOA");
+        _;
+    }
+
     using SafeMathUpgradeable for uint256;
     using SafeERC20Upgradeable for IERC20Upgradeable;
 
@@ -47,6 +52,11 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
     address public profitUser;
     address public oracle;
     address public execAddress;
+
+     modifier onlyExec() {
+        require(execAddress == msg.sender, "Not Allow");
+        _;
+    }
 
     function initialize(address _profit,address _execAddress)public initializer{
       
@@ -129,7 +139,7 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
     }
 
 
-    function  setPrice() external nonReentrant{
+    function  setPrice() external nonReentrant onlyExec onlyEOA{
        
         address xdkTrigger = execAddress;
         if(xdkTrigger.balance < 0.001 ether){
@@ -153,7 +163,9 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             // 卖出0.1%
             if(IERC20Upgradeable(xdk).balanceOf(address(this))>0){
                 uint256 fee = IERC20Upgradeable(xdk).balanceOf(address(this))* SELL_RATE/1000;
-                swapTokenForUSDT(fee,address(this));
+                if(fee >0){
+                   swapTokenForUSDT(fee,address(this));
+                }
             }
             lastPrice = IXDKOracle(oracle).priceTime(5 minutes);
             return;
