@@ -182,8 +182,9 @@ contract XDKMarket is OwnableUpgradeable,ReentrancyGuardUpgradeable{
             lastPrice = currentPrice;
             lastTime = block.timestamp;
         }else if(currentPrice<=lastPrice*(100-BUY_PRICE)/100 && block.timestamp>= lastTime + FOR_TRADE_COLD){
-            if(usdt.balanceOf(address(this)) >0){
-                swapUSDTForToken(usdt.balanceOf(address(this))*BUY_RATE/1000, address(this));
+            uint256 buyAmount = usdt.balanceOf(address(this))*BUY_RATE/1000;
+            if(buyAmount>0){
+                swapUSDTForToken(buyAmount, address(this));
             }
             lastPrice = currentPrice;
             lastTime = block.timestamp;
