@@ -716,6 +716,9 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
 
         // 单次遍历完成「找最大值+累加总额」→ 双重遍历 → 单次遍历
         for (uint256 i = 0; i < referralList.length; i++) {
+            if(i==D_MAX){
+                break;
+            } 
             uint256 val = teamTotalInvestValue[referralList[i]];
             if (val > maxStar) {
                 totalStar += maxStar;
