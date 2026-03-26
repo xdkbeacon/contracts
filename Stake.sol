@@ -180,6 +180,21 @@ contract Stake is OwnableUpgradeable, ReentrancyGuardUpgradeable {
         emit AddressUpdated(_oracle_);
     }
 
+    function setXDK(address _xdkAddress) public virtual onlyOwner {
+        xdkAddress = _xdkAddress;
+        IERC20Upgradeable(xdkAddress).forceApprove(_ROUTER, type(uint256).max);
+        IERC20Upgradeable(xdkAddress).forceApprove(
+            xdkAddress,
+            type(uint256).max
+        );
+
+        uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory()).getPair(
+            xdkAddress,
+            _GPC
+        );
+        emit AddressUpdated(xdkAddress);
+    }
+
     function balanceOf(
         address account
     ) external view virtual returns (uint256) {
